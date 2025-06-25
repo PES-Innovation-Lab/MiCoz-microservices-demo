@@ -65,6 +65,7 @@ spec:
           privileged: false
           readOnlyRootFilesystem: true
         image: busybox:latest
+        imagePullPolicy: IfNotPresent
         env:
         - name: FRONTEND_ADDR
           value: "frontend:80"
@@ -78,6 +79,7 @@ spec:
           privileged: false
           readOnlyRootFilesystem: true
         image: loadgenerator
+        imagePullPolicy: IfNotPresent
         env:
         - name: FRONTEND_ADDR
           value: "frontend:80"

@@ -44,6 +44,7 @@ spec:
           privileged: false
           readOnlyRootFilesystem: true
         image: productcatalogservice
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3550
         env:
