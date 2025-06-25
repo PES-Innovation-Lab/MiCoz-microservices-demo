@@ -50,6 +50,12 @@ spec:
         env:
         - name: PORT
           value: "9555"
+        - name: COLLECTOR_SERVICE_ADDR
+          value: "jaeger:4317"
+        - name: ENABLE_TRACING
+          value: "1"
+        - name: OTEL_SERVICE_NAME
+          value: "adservice"
         resources:
           requests:
             cpu: 200m

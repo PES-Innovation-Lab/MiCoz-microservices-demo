@@ -52,6 +52,12 @@ spec:
           value: "50051"
         - name: DISABLE_PROFILER
           value: "1"
+            #- name: COLLECTOR_SERVICE_ADDR
+              #value: "jaeger:4317"
+            #- name: ENABLE_TRACING
+              #value: "1"
+            #- name: OTEL_SERVICE_NAME
+              #value: "paymentservice"
         readinessProbe:
           grpc:
             port: 50051
