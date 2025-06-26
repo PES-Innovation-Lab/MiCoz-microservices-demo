@@ -260,7 +260,7 @@ message Ad {
     string text = 2;
 }
 
-service DelayStore {
+service SpeedController {
   rpc GetGlobalDelay(Empty) returns (GetDelayResponse) {}
   rpc IncGlobalDelay(IncDelayRequest) returns (Empty) {}
 }

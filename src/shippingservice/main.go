@@ -18,12 +18,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
@@ -78,14 +80,8 @@ func main() {
 		propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
 
-	var srv *grpc.Server
-	if os.Getenv("DISABLE_STATS") == "" {
-		log.Info("Stats enabled, but temporarily unavailable")
-		srv = grpc.NewServer()
-	} else {
-		log.Info("Stats disabled.")
-		srv = grpc.NewServer()
-	}
+	srv := grpc.NewServer(grpc.UnaryInterceptor(incomingRequestInterceptor))
+	// srv := grpc.NewServer()
 	svc := &server{}
 	pb.RegisterShippingServiceServer(srv, svc)
 	healthpb.RegisterHealthServer(srv, svc)
@@ -158,7 +154,7 @@ func initTracing() error {
 	ctx := context.Background()
 
 	mustMapEnv(&collectorAddr, "COLLECTOR_SERVICE_ADDR")
-	mustConnGRPC(ctx, &collectorConn, collectorAddr)
+	mustConnOTEL(ctx, &collectorConn, collectorAddr)
 
 	exporter, err := otlptracegrpc.New(
 		ctx,
@@ -181,7 +177,7 @@ func mustMapEnv(target *string, envKey string) {
 	*target = v
 }
 
-func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
+func mustConnOTEL(ctx context.Context, conn **grpc.ClientConn, addr string) {
 	var err error
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
@@ -192,4 +188,93 @@ func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
 	if err != nil {
 		panic(errors.Wrapf(err, "grpc: failed to connect %s", addr))
 	}
+}
+
+func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
+	var err error
+	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
+	defer cancel()
+	*conn, err = grpc.DialContext(ctx, addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			otelgrpc.UnaryClientInterceptor(),
+			outgoingRequestInterceptor,
+		),
+		grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()))
+	if err != nil {
+		panic(errors.Wrapf(err, "grpc: failed to connect %s", addr))
+	}
+}
+
+func parseDelay(md metadata.MD) (int, error) {
+	lcValues := md.Get("lc")
+	if len(lcValues) == 0 {
+		return -1, status.Errorf(codes.InvalidArgument, "missing 'lc' metadata")
+	}
+
+	delay, err := strconv.Atoi(lcValues[0])
+	if err != nil {
+		return -1, status.Errorf(codes.InvalidArgument, "'lc' must be an integer")
+	}
+
+	return delay, nil
+}
+
+func incomingRequestInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Warnf("self called without metadata")
+	}
+
+	lc, err := parseDelay(md)
+	if err != nil {
+		log.Warnf("failed to parse incoming metadata")
+		lc = 0
+	}
+
+	// store the lc in a new context
+	ctx = context.WithValue(ctx, "lc", &lc)
+
+	resp, err := handler(ctx, req)
+
+	// retreive lc again, in case any changes are made to it
+	lcRef, ok := ctx.Value("lc").(*int)
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "unable to coerce")
+	}
+
+	time.Sleep(time.Duration(*lcRef) * time.Millisecond)
+
+	return resp, err
+}
+
+func outgoingRequestInterceptor(ctx context.Context, method string, req, reply any, clientConn *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) (error) {
+	lcRef, ok := ctx.Value("lc").(*int)
+	if !ok {
+		lc := 0
+		lcRef = &lc
+	}
+
+	// send our lc
+	newCtx := metadata.AppendToOutgoingContext(ctx, "lc", strconv.Itoa(*lcRef))
+
+	err := invoker(newCtx, method, req, reply, clientConn, opts...)
+
+	md, ok := metadata.FromIncomingContext(newCtx)
+	if !ok {
+		log.Warnf("method: %s did not return metadata", method)
+		return err
+	}
+
+	lc, err := parseDelay(md)
+	if err != nil {
+		log.Warnf("failed to parse returning metadata")
+		lc = 0
+	}
+
+	if lc > *lcRef {
+		*lcRef = lc
+	}
+
+	return err
 }
