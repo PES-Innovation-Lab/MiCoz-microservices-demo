@@ -42,15 +42,16 @@ if(process.env.ENABLE_TRACING == "1") {
   const { Resource } = require('@opentelemetry/resources');
   const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
 
+  const collectorUrl = process.env.COLLECTOR_SERVICE_ADDR
+
   const provider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor( new OTLPTraceExporter({url: collectorUrl}) )],
     resource: new Resource({
       [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'paymentservice',
+
     }),
   });
 
-  const collectorUrl = process.env.COLLECTOR_SERVICE_ADDR
-
-  provider.addSpanProcessor(new SimpleSpanProcessor(new OTLPTraceExporter({url: collectorUrl})));
   provider.register();
 
   registerInstrumentations({

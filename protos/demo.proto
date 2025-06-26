@@ -13,7 +13,6 @@
 // limitations under the License.
 
 syntax = "proto3";
-
 package hipstershop;
 
 option go_package = "github.com/GoogleCloudPlatform/microservices-demo/hipstershop";
@@ -259,4 +258,17 @@ message Ad {
 
     // short advertisement text to display.
     string text = 2;
+}
+
+service DelayStore {
+  rpc GetGlobalDelay(Empty) returns (GetDelayResponse) {}
+  rpc IncGlobalDelay(IncDelayRequest) returns (Empty) {}
+}
+
+message GetDelayResponse {
+  int32 global_delay = 1;
+}
+
+message IncDelayRequest {
+  int32 delay_size = 1;
 }
