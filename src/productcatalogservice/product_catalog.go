@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -54,7 +53,6 @@ func (p *server) GetProduct(ctx context.Context, req *pb.GetProductRequest) (*pb
 		return nil, status.Errorf(codes.NotFound, "no product with ID %s", req.Id)
 	}
 
-	fmt.Print("Products found sending back result")
 	return found, nil
 }
 

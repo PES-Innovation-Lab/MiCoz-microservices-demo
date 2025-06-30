@@ -61,7 +61,6 @@ type server struct {
 
 	speedMap map[string]bool
 	delayMap map[string]int
-	processedRequests sync.Map
 
 	defaultDelay int
 

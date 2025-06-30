@@ -1,8 +1,6 @@
 package main
 
 import (
-	"sync"
-
 	"google.golang.org/grpc"
 
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/genproto"
@@ -34,7 +32,6 @@ type server struct {
 
 	speedMap map[string]bool
 	delayMap map[string]int
-	processedRequests sync.Map
 
 	defaultDelay int
 }

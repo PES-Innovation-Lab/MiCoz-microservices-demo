@@ -117,11 +117,6 @@ func incomingRequestInterceptor(ctx context.Context, req any, serverInfo *grpc.U
 		return resp, rpcErr
 	}
 
-	if _, exists := svc.processedRequests.LoadOrStore(endpoint, true); exists {
-		resp, rpcErr := handler(ctx, req)
-		return resp, rpcErr
-	}
-
 	delayCtx := &DelayContext{
 		LocalDelay: localDelay,
 		Endpoint:   endpoint,

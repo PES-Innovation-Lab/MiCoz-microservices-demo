@@ -117,11 +117,6 @@ func incomingRequestInterceptor(ctx context.Context, req any, serverInfo *grpc.U
 		return resp, rpcErr
 	}
 
-	if _, exists := svc.processedRequests.LoadOrStore(endpoint, true); exists {
-		resp, rpcErr := handler(ctx, req)
-		return resp, rpcErr
-	}
-
 	delayCtx := &DelayContext{
 		LocalDelay: localDelay,
 		Endpoint:   endpoint,
@@ -154,9 +149,15 @@ func incomingRequestInterceptor(ctx context.Context, req any, serverInfo *grpc.U
 }
 
 func outgoingRequestInterceptor(ctx context.Context, method string, req, reply any, clientConn *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	var count bool
+
 	delayCtx, err := parseCtx(ctx)
 	if err != nil {
 		return err
+	}
+
+	if count {
+		return nil
 	}
 
 	ctx = metadata.AppendToOutgoingContext(ctx,
@@ -167,11 +168,15 @@ func outgoingRequestInterceptor(ctx context.Context, method string, req, reply a
 	var trailer metadata.MD
 	opts = append(opts, grpc.Trailer(&trailer))
 
+	count, ok := ctx.Value("count").(bool)
+	if !ok {
+		ctx = context.WithValue(ctx, "count", true)
+	}
+
 	rpcErr := invoker(ctx, method, req, reply, clientConn, opts...)
 
 	if delayVals := trailer.Get("localDelay"); len(delayVals) > 0 {
 		if calleeDelay, err := strconv.Atoi(delayVals[0]); err == nil {
-
 			if calleeDelay > delayCtx.LocalDelay {
 				delayCtx.LocalDelay = calleeDelay
 			}

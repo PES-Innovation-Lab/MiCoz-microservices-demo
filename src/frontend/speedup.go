@@ -39,38 +39,6 @@ type DelayContext struct {
 
 const DelayCtxKey = "delayCtx"
 
-func parseMD (ctx context.Context) (int, string, error) {
-	var delay int
-	var endpoint string
-	var err error
-
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		log.Warnf("self called without receiving any metadata")
-	}
-
-	localDelayValues := md.Get("localDelay")
-	if len(localDelayValues) == 0 {
-		delay = 0
-	} else {
-		delay, err = strconv.Atoi(localDelayValues[0])
-		if err != nil {
-			delay = 0
-			log.Warnf("invalid localDelay: %v", err)
-		}
-	}
-
-	endpointArr := md.Get("endpoint")
-	if len(endpointArr) == 0 {
-		return 0, "", fmt.Errorf("No endpoint in metadata")
-	}
-
-	endpoint = endpointArr[0]
-
-	return delay, endpoint, nil
-}
-
-
 func parseCtx(ctx context.Context) (*DelayContext, error) {
 	delayCtx, ok := ctx.Value(DelayCtxKey).(*DelayContext)
 	if !ok {
@@ -95,68 +63,16 @@ func syncDelays (ctx context.Context, delayCtx *DelayContext) error {
 	return nil
 }
 
-func getDelay (method string) int {
-	delay, ok := svc.delayMap[method]
-	if ok {
-		return delay
-	}
-
-	if svc.defaultDelay == 0 {
-		delay = 10
-	} else {
-		delay = svc.defaultDelay
-	}
-
-	return delay
-}
-
-func incomingRequestInterceptor(ctx context.Context, req any, serverInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-	localDelay, endpoint, err := parseMD(ctx)
-	if err != nil {
-		resp, rpcErr := handler(ctx, req)
-		return resp, rpcErr
-	}
-
-	if _, exists := svc.processedRequests.LoadOrStore(endpoint, true); exists {
-		resp, rpcErr := handler(ctx, req)
-		return resp, rpcErr
-	}
-
-	delayCtx := &DelayContext{
-		LocalDelay: localDelay,
-		Endpoint:   endpoint,
-	}
-
-	toSpeed, ok := svc.speedMap[serverInfo.FullMethod]
-	if !ok {
-		toSpeed = false
-	} else {
-		localDelay += getDelay(serverInfo.FullMethod)
-	}
-
-	ctx = context.WithValue(ctx, DelayCtxKey, delayCtx)
-	if toSpeed {
-		if err = incGlobalDelay(ctx, serverInfo.FullMethod); err != nil {
-			return nil, err
-		}
-	}
-
-	resp, rpcErr := handler(ctx, req)
-
-	err = syncDelays(ctx, delayCtx)
-	if err != nil {
-		return resp, err
-	}
-
-	grpc.SetTrailer(ctx, metadata.Pairs("localDelay", strconv.Itoa(delayCtx.LocalDelay)))
-
-	return resp, rpcErr
-}
-
 func outgoingRequestInterceptor(ctx context.Context, method string, req, reply any, clientConn *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	var count bool
+
 	delayCtx, err := parseCtx(ctx)
 	if err != nil {
 		return err
+	}
+
+	if count {
+		return nil
 	}
 
 	ctx = metadata.AppendToOutgoingContext(ctx,
@@ -167,11 +83,15 @@ func outgoingRequestInterceptor(ctx context.Context, method string, req, reply a
 	var trailer metadata.MD
 	opts = append(opts, grpc.Trailer(&trailer))
 
+	count, ok := ctx.Value("count").(bool)
+	if !ok {
+		ctx = context.WithValue(ctx, "count", true)
+	}
+
 	rpcErr := invoker(ctx, method, req, reply, clientConn, opts...)
 
 	if delayVals := trailer.Get("localDelay"); len(delayVals) > 0 {
 		if calleeDelay, err := strconv.Atoi(delayVals[0]); err == nil {
-
 			if calleeDelay > delayCtx.LocalDelay {
 				delayCtx.LocalDelay = calleeDelay
 			}
@@ -194,16 +114,4 @@ func getGlobalDelay(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("failed to get global delay: %w", err)
 	}
 	return int(resp.GetGlobalDelay()), nil
-}
-
-func incGlobalDelay(ctx context.Context, method string) error {
-	delayCtx, err := parseCtx(ctx)
-	if err != nil {
-		return err
-	}
-
-	_, err = pb.NewDelayStoreClient(svc.delayStoreConn).IncGlobalDelay(ctx,
-		&pb.IncDelayRequest{DelaySize: int32(getDelay(method)), Endpoint: delayCtx.Endpoint},
-	)
-	return err
 }
