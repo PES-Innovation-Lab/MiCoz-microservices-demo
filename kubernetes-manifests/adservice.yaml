@@ -56,6 +56,8 @@ spec:
           value: "1"
         - name: OTEL_SERVICE_NAME
           value: "adservice"
+        - name: "DELAYSTORE_ADDR"
+          value: "delaystore:5000"
         resources:
           requests:
             cpu: 200m

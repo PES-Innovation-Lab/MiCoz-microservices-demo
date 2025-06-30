@@ -89,10 +89,8 @@ spec:
             value: "1"
           - name: OTEL_SERVICE_NAME
             value: "frontend"
-          # # ENV_PLATFORM: One of: local, gcp, aws, azure, onprem, alibaba
-          # # When not set, defaults to "local" unless running in GKE, otherwies auto-sets to gcp
-          # - name: ENV_PLATFORM
-          #   value: "aws"
+          - name: "DELAYSTORE_ADDR"
+            value: "delaystore:5000"
           - name: ENABLE_PROFILER
             value: "0"
           # - name: CYMBAL_BRANDING

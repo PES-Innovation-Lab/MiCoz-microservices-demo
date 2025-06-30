@@ -60,6 +60,8 @@ func init() {
 }
 
 func main() {
+	svc.defaultDelay = 10
+
 	initTracing()
 
 	port := defaultPort
@@ -78,17 +80,16 @@ func main() {
 		propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
 
-	var srv *grpc.Server
-	if os.Getenv("DISABLE_STATS") == "" {
-		log.Info("Stats enabled, but temporarily unavailable")
-		srv = grpc.NewServer()
-	} else {
-		log.Info("Stats disabled.")
-		srv = grpc.NewServer()
-	}
-	svc := &server{}
-	pb.RegisterShippingServiceServer(srv, svc)
-	healthpb.RegisterHealthServer(srv, svc)
+	svc.defaultDelay = 10
+
+	ctx := context.Background()
+	mustMapEnv(&svc.delayStoreAddr, "DELAYSTORE_ADDR")
+	mustConnOTEL(ctx, &svc.delayStoreConn, svc.delayStoreAddr)
+
+	srv := grpc.NewServer(grpc.UnaryInterceptor(incomingRequestInterceptor))
+
+	pb.RegisterShippingServiceServer(srv, &svc)
+	healthpb.RegisterHealthServer(srv, &svc)
 	log.Infof("Registration successful, Shipping Service listening on port %s", port)
 
 	// Register reflection service on gRPC server.
@@ -96,11 +97,6 @@ func main() {
 	if err := srv.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
-}
-
-// server controls RPC service responses.
-type server struct {
-	pb.UnimplementedShippingServiceServer
 }
 
 // Check is for health checking.
@@ -158,7 +154,7 @@ func initTracing() error {
 	ctx := context.Background()
 
 	mustMapEnv(&collectorAddr, "COLLECTOR_SERVICE_ADDR")
-	mustConnGRPC(ctx, &collectorConn, collectorAddr)
+	mustConnOTEL(ctx, &collectorConn, collectorAddr)
 
 	exporter, err := otlptracegrpc.New(
 		ctx,
@@ -181,7 +177,7 @@ func mustMapEnv(target *string, envKey string) {
 	*target = v
 }
 
-func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
+func mustConnOTEL(ctx context.Context, conn **grpc.ClientConn, addr string) {
 	var err error
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
@@ -193,3 +189,5 @@ func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
 		panic(errors.Wrapf(err, "grpc: failed to connect %s", addr))
 	}
 }
+
+

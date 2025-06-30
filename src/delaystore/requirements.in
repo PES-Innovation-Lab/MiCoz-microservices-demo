@@ -1,0 +1,10 @@
+grpcio-tools
+flask
+google-api-core
+grpcio-health-checking
+python-json-logger
+requests
+rsa
+opentelemetry-distro
+opentelemetry-instrumentation-grpc
+opentelemetry-exporter-otlp-proto-grpc

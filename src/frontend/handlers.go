@@ -19,9 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -54,11 +52,46 @@ var (
 	plat platformDetails
 )
 
-var validEnvs = []string{"local", "gcp", "azure", "aws", "onprem", "alibaba"}
+func getEndpointInstance(endpoint string) string {
+	for {
+		value, loaded := svc.endpointCallMap.LoadOrStore(endpoint, 0)
+		if !loaded {
+			return fmt.Sprintf("%s%d", endpoint, 1)
+		}
 
-func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
+		prevInsnNo := value.(int)
+		currInsnNo := prevInsnNo + 1
+
+		if svc.endpointCallMap.CompareAndSwap(endpoint, prevInsnNo, currInsnNo) {
+			return fmt.Sprintf("%s%d", endpoint, currInsnNo)
+		}
+	}
+}
+
+func getRequestWithCtx (r *http.Request, endpoint string) *http.Request {
+	delayCtx := &DelayContext{
+		LocalDelay: 0,
+		Endpoint:   getEndpointInstance(endpoint),
+	}
+
+	ctx := context.WithValue(r.Context(), DelayCtxKey, delayCtx)
+
+	stored := ctx.Value(DelayCtxKey)
+	fmt.Printf("Stored in context: %+v, type: %T\n", stored, stored)
+
+	newReq := r.WithContext(ctx)
+
+	return newReq
+}
+
+func (fe *server) homeHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "home")
+	delayCtx, _ := parseCtx(r.Context())
+	fmt.Printf("Created context with endpoint %s", delayCtx.Endpoint)
+
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	log.WithField("currency", currentCurrency(r)).Info("home")
+
 	currencies, err := fe.getCurrencies(r.Context())
 	if err != nil {
 		renderHTTPError(log, r, w, errors.Wrap(err, "could not retrieve currencies"), http.StatusInternalServerError)
@@ -89,24 +122,6 @@ func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 		ps[i] = productView{p, price}
 	}
 
-	// Set ENV_PLATFORM (default to local if not set; use env var if set; otherwise detect GCP, which overrides env)_
-	var env = os.Getenv("ENV_PLATFORM")
-	// Only override from env variable if set + valid env
-	if env == "" || stringinSlice(validEnvs, env) == false {
-		fmt.Println("env platform is either empty or invalid")
-		env = "local"
-	}
-	// Autodetect GCP
-	addrs, err := net.LookupHost("metadata.google.internal.")
-	if err == nil && len(addrs) >= 0 {
-		log.Debugf("Detected Google metadata server: %v, setting ENV_PLATFORM to GCP.", addrs)
-		env = "gcp"
-	}
-
-	log.Debugf("ENV_PLATFORM is: %s", env)
-	plat = platformDetails{}
-	plat.setPlatformDetails(strings.ToLower(env))
-
 	if err := templates.ExecuteTemplate(w, "home", injectCommonTemplateData(r, map[string]interface{}{
 		"show_currency": true,
 		"currencies":    currencies,
@@ -119,30 +134,11 @@ func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (plat *platformDetails) setPlatformDetails(env string) {
-	if env == "aws" {
-		plat.provider = "AWS"
-		plat.css = "aws-platform"
-	} else if env == "onprem" {
-		plat.provider = "On-Premises"
-		plat.css = "onprem-platform"
-	} else if env == "azure" {
-		plat.provider = "Azure"
-		plat.css = "azure-platform"
-	} else if env == "gcp" {
-		plat.provider = "Google Cloud"
-		plat.css = "gcp-platform"
-	} else if env == "alibaba" {
-		plat.provider = "Alibaba Cloud"
-		plat.css = "alibaba-platform"
-	} else {
-		plat.provider = "local"
-		plat.css = "local"
-	}
-}
+func (fe *server) productHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "product")
 
-func (fe *frontendServer) productHandler(w http.ResponseWriter, r *http.Request) {
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
+
 	id := mux.Vars(r)["id"]
 	if id == "" {
 		renderHTTPError(log, r, w, errors.New("product id not specified"), http.StatusBadRequest)
@@ -208,7 +204,9 @@ func (fe *frontendServer) productHandler(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func (fe *frontendServer) addToCartHandler(w http.ResponseWriter, r *http.Request) {
+func (fe *server) addToCartHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "addtocart")
+
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	quantity, _ := strconv.ParseUint(r.FormValue("quantity"), 10, 32)
 	productID := r.FormValue("product_id")
@@ -236,7 +234,9 @@ func (fe *frontendServer) addToCartHandler(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusFound)
 }
 
-func (fe *frontendServer) emptyCartHandler(w http.ResponseWriter, r *http.Request) {
+func (fe *server) emptyCartHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "emptycart")
+
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	log.Debug("emptying cart")
 
@@ -248,7 +248,9 @@ func (fe *frontendServer) emptyCartHandler(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusFound)
 }
 
-func (fe *frontendServer) viewCartHandler(w http.ResponseWriter, r *http.Request) {
+func (fe *server) viewCartHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "viewcart")
+
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	log.Debug("view user cart")
 	currencies, err := fe.getCurrencies(r.Context())
@@ -317,7 +319,9 @@ func (fe *frontendServer) viewCartHandler(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Request) {
+func (fe *server) placeOrderHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "checkout")
+
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	log.Debug("placing order")
 
@@ -400,22 +404,9 @@ func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (fe *frontendServer) assistantHandler(w http.ResponseWriter, r *http.Request) {
-	currencies, err := fe.getCurrencies(r.Context())
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "could not retrieve currencies"), http.StatusInternalServerError)
-		return
-	}
+func (fe *server) logoutHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "logout")
 
-	if err := templates.ExecuteTemplate(w, "assistant", injectCommonTemplateData(r, map[string]interface{}{
-		"show_currency": false,
-		"currencies":    currencies,
-	})); err != nil {
-		log.Println(err)
-	}
-}
-
-func (fe *frontendServer) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	log.Debug("logging out")
 	for _, c := range r.Cookies() {
@@ -427,7 +418,9 @@ func (fe *frontendServer) logoutHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusFound)
 }
 
-func (fe *frontendServer) getProductByID(w http.ResponseWriter, r *http.Request) {
+func (fe *server) getProductByID(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "getproduct")
+
 	id := mux.Vars(r)["ids"]
 	if id == "" {
 		return
@@ -448,55 +441,9 @@ func (fe *frontendServer) getProductByID(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 }
 
-func (fe *frontendServer) chatBotHandler(w http.ResponseWriter, r *http.Request) {
-	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
-	type Response struct {
-		Message string `json:"message"`
-	}
+func (fe *server) setCurrencyHandler(w http.ResponseWriter, r *http.Request) {
+	r = getRequestWithCtx(r, "setcurrency")
 
-	type LLMResponse struct {
-		Content string         `json:"content"`
-		Details map[string]any `json:"details"`
-	}
-
-	var response LLMResponse
-
-	url := "http://" + fe.shoppingAssistantSvcAddr
-	req, err := http.NewRequest(http.MethodPost, url, r.Body)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to create request"), http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to send request"), http.StatusInternalServerError)
-		return
-	}
-
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to read response"), http.StatusInternalServerError)
-		return
-	}
-
-	fmt.Printf("%+v\n", body)
-	fmt.Printf("%+v\n", res)
-
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to unmarshal body"), http.StatusInternalServerError)
-		return
-	}
-
-	// respond with the same message
-	json.NewEncoder(w).Encode(Response{Message: response.Content})
-
-	w.WriteHeader(http.StatusOK)
-}
-
-func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Request) {
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	cur := r.FormValue("currency_code")
 	payload := validator.SetCurrencyPayload{Currency: cur}
@@ -524,7 +471,7 @@ func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Requ
 
 // chooseAd queries for advertisements available and randomly chooses one, if
 // available. It ignores the error retrieving the ad since it is not critical.
-func (fe *frontendServer) chooseAd(ctx context.Context, ctxKeys []string, log logrus.FieldLogger) *pb.Ad {
+func (fe *server) chooseAd(ctx context.Context, ctxKeys []string, log logrus.FieldLogger) *pb.Ad {
 	ads, err := fe.getAd(ctx, ctxKeys)
 	if err != nil {
 		log.WithField("error", err).Warn("failed to retrieve ads")
@@ -623,13 +570,4 @@ func renderCurrencyLogo(currencyCode string) string {
 		logo = val
 	}
 	return logo
-}
-
-func stringinSlice(slice []string, val string) bool {
-	for _, item := range slice {
-		if item == val {
-			return true
-		}
-	}
-	return false
 }

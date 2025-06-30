@@ -20,7 +20,6 @@ import time
 import traceback
 from concurrent import futures
 
-import googlecloudprofiler
 from google.auth.exceptions import DefaultCredentialsError
 import grpc
 
@@ -37,19 +36,6 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 
 from logger import getJSONLogger
 logger = getJSONLogger('recommendationservice-server')
-
-class Node:
-    def __init__(self, delay: int):
-        global speed
-        global delay_size
-
-        self.delay = delay
-        self.global_delay = 0
-        self.lock = threading.Lock()
-
-        if (speed):
-            self.delay += delay_size
-            self.increment_global_delay(delay_size)
 
 class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
     def ListRecommendations(self, request, context):

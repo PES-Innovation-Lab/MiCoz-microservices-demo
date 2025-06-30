@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+/// Copyright 2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ service CartService {
     rpc AddItem(AddItemRequest) returns (Empty) {}
     rpc GetCart(GetCartRequest) returns (Cart) {}
     rpc EmptyCart(EmptyCartRequest) returns (Empty) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 message CartItem {
@@ -71,6 +73,8 @@ service ProductCatalogService {
     rpc ListProducts(Empty) returns (ListProductsResponse) {}
     rpc GetProduct(GetProductRequest) returns (Product) {}
     rpc SearchProducts(SearchProductsRequest) returns (SearchProductsResponse) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 message Product {
@@ -106,6 +110,8 @@ message SearchProductsResponse {
 service ShippingService {
     rpc GetQuote(GetQuoteRequest) returns (GetQuoteResponse) {}
     rpc ShipOrder(ShipOrderRequest) returns (ShipOrderResponse) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 message GetQuoteRequest {
@@ -139,6 +145,8 @@ message Address {
 service CurrencyService {
     rpc GetSupportedCurrencies(Empty) returns (GetSupportedCurrenciesResponse) {}
     rpc Convert(CurrencyConversionRequest) returns (Money) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 // Represents an amount of money with its currency type.
@@ -175,6 +183,8 @@ message CurrencyConversionRequest {
 
 service PaymentService {
     rpc Charge(ChargeRequest) returns (ChargeResponse) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 message CreditCardInfo {
@@ -197,6 +207,8 @@ message ChargeResponse {
 
 service EmailService {
     rpc SendOrderConfirmation(SendOrderConfirmationRequest) returns (Empty) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 message OrderItem {
@@ -222,6 +234,8 @@ message SendOrderConfirmationRequest {
 
 service CheckoutService {
     rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 message PlaceOrderRequest {
@@ -241,6 +255,8 @@ message PlaceOrderResponse {
 
 service AdService {
     rpc GetAds(AdRequest) returns (AdResponse) {}
+    rpc SetSpeed(SetSpeedRequest) returns (Empty) {}
+    rpc ClearState(Empty) returns (Empty) {}
 }
 
 message AdRequest {
@@ -260,9 +276,19 @@ message Ad {
     string text = 2;
 }
 
+// -----------Speed Controller--------------
+
 service DelayStore {
-  rpc GetGlobalDelay(Empty) returns (GetDelayResponse) {}
+  rpc GetGlobalDelay(GetDelayRequest) returns (GetDelayResponse) {}
   rpc IncGlobalDelay(IncDelayRequest) returns (Empty) {}
+}
+
+message SetSpeedRequest {
+  int32 delay_size = 1;
+}
+
+message GetDelayRequest {
+  string endpoint = 1;
 }
 
 message GetDelayResponse {
@@ -270,5 +296,6 @@ message GetDelayResponse {
 }
 
 message IncDelayRequest {
-  int32 delay_size = 1;
+  string endpoint = 1;
+  int32 delay_size = 2;
 }

@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -29,7 +28,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	"cloud.google.com/go/profiler"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -74,27 +72,6 @@ func main() {
 		log.Info("Tracing disabled.")
 	}
 
-	if os.Getenv("DISABLE_PROFILER") == "" {
-		log.Info("Profiling enabled.")
-		go initProfiling("productcatalogservice", "1.0.0")
-	} else {
-		log.Info("Profiling disabled.")
-	}
-
-	flag.Parse()
-
-	// set injected latency
-	if s := os.Getenv("EXTRA_LATENCY"); s != "" {
-		v, err := time.ParseDuration(s)
-		if err != nil {
-			log.Fatalf("failed to parse EXTRA_LATENCY (%s) as time.Duration: %+v", v, err)
-		}
-		extraLatency = v
-		log.Infof("extra latency enabled (duration: %v)", extraLatency)
-	} else {
-		extraLatency = time.Duration(0)
-	}
-
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGUSR1, syscall.SIGUSR2)
 	go func() {
@@ -114,6 +91,13 @@ func main() {
 	if os.Getenv("PORT") != "" {
 		port = os.Getenv("PORT")
 	}
+
+	svc.defaultDelay = 10
+
+	ctx := context.Background()
+	mustMapEnv(&svc.delayStoreAddr, "DELAYSTORE_ADDR")
+	mustConnOTEL(ctx, &svc.delayStoreConn, svc.delayStoreAddr)
+
 	log.Infof("starting grpc server at :%s", port)
 	run(port)
 	select {}
@@ -131,24 +115,22 @@ func run(port string) string {
 			propagation.TraceContext{}, propagation.Baggage{}))
 	var srv *grpc.Server
 	srv = grpc.NewServer(
-		grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor()),
+		grpc.ChainUnaryInterceptor(
+			// otelgrpc.UnaryServerInterceptor(),
+			incomingRequestInterceptor,
+			),
 		grpc.StreamInterceptor(otelgrpc.StreamServerInterceptor()))
 
-	svc := &productCatalog{}
 	err = loadCatalog(&svc.catalog)
 	if err != nil {
 		log.Fatalf("could not parse product catalog: %v", err)
 	}
 
-	pb.RegisterProductCatalogServiceServer(srv, svc)
-	healthpb.RegisterHealthServer(srv, svc)
+	pb.RegisterProductCatalogServiceServer(srv, &svc)
+	healthpb.RegisterHealthServer(srv, &svc)
 	go srv.Serve(listener)
 
 	return listener.Addr().String()
-}
-
-func initStats() {
-	// TODO(drewbr) Implement OpenTelemetry stats
 }
 
 func initTracing() error {
@@ -160,7 +142,7 @@ func initTracing() error {
 	ctx := context.Background()
 
 	mustMapEnv(&collectorAddr, "COLLECTOR_SERVICE_ADDR")
-	mustConnGRPC(ctx, &collectorConn, collectorAddr)
+	mustConnOTEL(ctx, &collectorConn, collectorAddr)
 
 	exporter, err := otlptracegrpc.New(
 		ctx,
@@ -175,26 +157,6 @@ func initTracing() error {
 	return err
 }
 
-func initProfiling(service, version string) {
-	for i := 1; i <= 3; i++ {
-		if err := profiler.Start(profiler.Config{
-			Service:        service,
-			ServiceVersion: version,
-			// ProjectID must be set if not running on GCP.
-			// ProjectID: "my-project",
-		}); err != nil {
-			log.Warnf("failed to start profiler: %+v", err)
-		} else {
-			log.Info("started Stackdriver profiler")
-			return
-		}
-		d := time.Second * 10 * time.Duration(i)
-		log.Infof("sleeping %v to retry initializing Stackdriver profiler", d)
-		time.Sleep(d)
-	}
-	log.Warn("could not initialize Stackdriver profiler after retrying, giving up")
-}
-
 func mustMapEnv(target *string, envKey string) {
 	v := os.Getenv(envKey)
 	if v == "" {
@@ -203,7 +165,7 @@ func mustMapEnv(target *string, envKey string) {
 	*target = v
 }
 
-func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
+func mustConnOTEL(ctx context.Context, conn **grpc.ClientConn, addr string) {
 	var err error
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()

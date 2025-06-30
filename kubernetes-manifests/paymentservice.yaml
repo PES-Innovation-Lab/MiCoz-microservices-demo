@@ -58,6 +58,8 @@ spec:
           value: "1"
         - name: OTEL_SERVICE_NAME
           value: "paymentservice"
+        - name: "DELAYSTORE_ADDR"
+          value: "delaystore:5000"
         readinessProbe:
           grpc:
             port: 50051

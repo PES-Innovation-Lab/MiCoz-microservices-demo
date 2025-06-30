@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: delaystore
+  labels:
+    app: delaystore
+spec:
+  selector:
+    matchLabels:
+      app: delaystore
+  template:
+    metadata:
+      labels:
+        app: delaystore
+    spec:
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: server
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          readOnlyRootFilesystem: true
+        image: delaystore
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5000
+        - containerPort: 8000
+        env:
+        - name: PORT
+          value: "5000"
+        - name: COLLECTOR_SERVICE_ADDR
+          value: "jaeger:4317"
+        - name: ENABLE_TRACING
+          value: "1"
+        - name: OTEL_SERVICE_NAME
+          value: "delaystore"
+        readinessProbe:
+          periodSeconds: 5
+          grpc:
+            port: 5000
+        livenessProbe:
+          periodSeconds: 5
+          grpc:
+            port: 5000
+        resources:
+          requests:
+            cpu: 100m
+            memory: 220Mi
+          limits:
+            cpu: 200m
+            memory: 450Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: delaystore
+  labels:
+    app: delaystore
+spec:
+  type: NodePort
+  selector:
+    app: delaystore
+  ports:
+  - name: grpc
+    port: 5000
+    targetPort: 5000
+  - name: http
+    port: 8000
+    targetPort: 8000
